@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 import urllib.error
@@ -58,6 +59,16 @@ class Summary:
     @property
     def megabits_per_second(self) -> float:
         return self.megabytes_per_second * 8
+
+    def as_dict(self) -> dict[str, int | float]:
+        """Итог в виде словаря для машинного вывода (--json)."""
+        return {
+            "runs": len(self.attempts),
+            "average_seconds": self.average_seconds,
+            "total_bytes": self.total_bytes,
+            "megabytes_per_second": self.megabytes_per_second,
+            "megabits_per_second": self.megabits_per_second,
+        }
 
 
 def with_cache_buster(url: str, token: str) -> str:
@@ -115,6 +126,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="не добавлять к URL параметр против кэширования",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="печатать итог одной строкой JSON вместо отчёта и прогресса",
+    )
     return parser
 
 
@@ -134,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
             runs=args.runs,
             timeout=args.timeout,
             cache_bust=not args.no_cache_bust,
-            on_attempt=report,
+            on_attempt=None if args.json else report,
         )
     except ValueError as error:
         print(f"Ошибка: {error}", file=sys.stderr)
@@ -145,6 +161,11 @@ def main(argv: list[str] | None = None) -> int:
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         print(f"Ошибка: не удалось скачать {args.url}: {error}", file=sys.stderr)
         return 1
+
+    if args.json:
+        # Одна строка, без экранирования не-ASCII — чтобы удобно парсить в пайпе.
+        print(json.dumps(summary.as_dict(), ensure_ascii=False))
+        return 0
 
     print()
     print(f"Запросов:            {len(summary.attempts)}")
