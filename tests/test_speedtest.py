@@ -1,3 +1,4 @@
+import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -65,3 +66,47 @@ def test_main_returns_error_code_for_unreachable_host(capsys):
     code = speedtest.main(["http://127.0.0.1:9/never", "--runs", "1", "--timeout", "0.5"])
     assert code == 1
     assert "не удалось скачать" in capsys.readouterr().err
+
+
+def test_summary_as_dict_has_expected_keys():
+    summary = Summary((Attempt(1.0, 1_000_000), Attempt(3.0, 3_000_000)))
+    assert summary.as_dict() == {
+        "runs": 2,
+        "average_seconds": 2.0,
+        "total_bytes": 4_000_000,
+        "megabytes_per_second": pytest.approx(1.0),
+        "megabits_per_second": pytest.approx(8.0),
+    }
+
+
+def test_main_json_prints_single_line_without_progress(local_url, capsys):
+    code = speedtest.main([local_url, "--runs", "2", "--timeout", "5", "--json"])
+    out, err = capsys.readouterr()
+
+    assert code == 0
+    assert err == ""
+    lines = out.splitlines()
+    assert len(lines) == 1  # только итог, без прогресса по запросам
+    data = json.loads(lines[0])
+    assert data["runs"] == 2
+    assert data["total_bytes"] == 2 * len(PAYLOAD)
+    assert data["average_seconds"] > 0
+    assert data["megabytes_per_second"] > 0
+    assert data["megabits_per_second"] == pytest.approx(data["megabytes_per_second"] * 8)
+
+
+def test_main_human_output_prints_progress(local_url, capsys):
+    code = speedtest.main([local_url, "--runs", "2", "--timeout", "5"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "[ 1/2]" in out and "[ 2/2]" in out
+    assert "Скорость:" in out
+
+
+def test_main_json_keeps_error_code_for_unreachable_host(capsys):
+    code = speedtest.main(["http://127.0.0.1:9/never", "--runs", "1", "--timeout", "0.5", "--json"])
+    out, err = capsys.readouterr()
+    assert code == 1
+    assert out == ""
+    assert "не удалось скачать" in err
